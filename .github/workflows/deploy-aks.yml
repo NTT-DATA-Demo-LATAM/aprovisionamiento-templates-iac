@@ -1,0 +1,58 @@
+name: Deploy AKS to Azure
+
+on:
+  push:
+    branches:
+      - mainAks
+
+env:
+  AZURE_RESOURCE_GROUP: ${{ secrets.AZURE_RESOURCE_GROUP }}
+  AZURE_LOCATION: ${{ secrets.AZURE_LOCATION }}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: Produccion
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Deploy with Bicep
+        uses: azure/arm-deploy@v1
+        if: ${{ endsWith(github.workspace, '.bicep') }}
+        with:
+          subscriptionId: ${{ secrets.AZURE_CREDENTIALS.subscriptionId }}
+          resourceGroupName: ${{ env.AZURE_RESOURCE_GROUP }}
+          template: ./infra/main.bicep
+          parameters: location=${{ env.AZURE_LOCATION }}
+
+      - name: Terraform Init
+        if: ${{ endsWith(github.workspace, '.tf') }}
+        uses: hashicorp/terraform-github-actions@v0.12.0
+        with:
+          tf_command: "init"
+          working_directory: ./infra
+
+      - name: Terraform Apply
+        if: ${{ endsWith(github.workspace, '.tf') }}
+        uses: hashicorp/terraform-github-actions@v0.12.0
+        with:
+          tf_command: "apply"
+          working_directory: ./infra
+          args: "-auto-approve"
+      - name: Get AKS Credentials
+        if: ${{ endsWith(github.workspace, '.tf') }} #Se puede modificar dependiendo de la logica que se desee.
+        run: |
+          az aks get-credentials --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --name myaks --admin --file kubeconfig.config
+      - name: Kubectl get nodes
+        if: ${{ endsWith(github.workspace, '.tf') }}
+        run: |
+          export KUBECONFIG=kubeconfig.config
+          kubectl get nodes
+      - name: Azure Logout
+        run: az logout
